@@ -1,0 +1,14 @@
+package "Example of .ggo file"
+version "1.0"
+purpose "Simple example (optional)"
+description "description needed (optional)"
+versiontext "versiontext needed (optional)"
+
+#----------------------------
+# independent options
+#----------------------------
+# Mandatory option
+option "size" s "size" int optional default="10"
+option "target" t "target" int required
+option "numthreads" n "numthreads" int required
+

@@ -1,0 +1,14 @@
+package "Example of .ggo file"
+version "1.0"
+purpose "Simple example (optional)"
+description "description needed (optional)"
+versiontext "versiontext needed (optional)"
+
+#----------------------------
+# independent options
+#----------------------------
+# Mandatory option
+option "thread" t "thread" int required
+option "file" f "file" string required
+option "byte" b "byte" int required
+
