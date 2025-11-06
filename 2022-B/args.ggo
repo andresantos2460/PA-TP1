@@ -8,11 +8,5 @@ versiontext "versiontext needed (optional)"
 # independent options
 #----------------------------
 # Mandatory option
-option "folder" f "folder" string typestr="dirname" required
-
-# Optional
-option "num" n "number" int optional
-
-#
-# NOTE: support for this file needs to be enabled in 'makefile'
-#
+option "number_threads" t "number_threads" int optional default="10"
+option "num_of_reservations" r "num_of_reservations" int optional default="4"
