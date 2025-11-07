@@ -79,6 +79,7 @@
 	while (???){		
 		if ((errno = pthread_cond_wait(params->ptr_cond, params->ptr_mutex)!=0)){   
 			WARNING("pthread_cond_wait() failed");
+			
 			return NULL;
 		}
 	}

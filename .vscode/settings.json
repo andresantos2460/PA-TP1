@@ -1,0 +1,7 @@
+{
+    "files.associations": {
+        "debug.h": "c",
+        "pthread.h": "c",
+        "__locale": "c"
+    }
+}
