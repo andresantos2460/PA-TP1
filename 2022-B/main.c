@@ -21,6 +21,7 @@
 #include "debug.h"
 #include "memory.h"
 #include "args.h"
+#include <signal.h>
 
 #define SIZE_ARRAY 16
 // declaração global  ** (não copiar este comentário) ** 
@@ -34,11 +35,18 @@ typedef struct
 }thread_params_t;
 
 void *task(void *arg);
+void trata_sinal(int signal);
+int flag = 0;  // só para comunicação com o handler
+
 
 int main(int argc, char *argv[]) {
     
 	struct gengetopt_args_info args;
-
+	struct sigaction act;
+    // configura handler
+    act.sa_handler = trata_sinal;     // função que será chamada
+    sigemptyset(&act.sa_mask);        // não bloqueia outros sinais
+    act.sa_flags = 0;                 // flags padrão
 	// gengetopt parser: deve ser a primeira linha de código no main
 	if(cmdline_parser(argc, argv, &args))
 		ERROR(1, "Erro: execução de cmdline_parser\n");
@@ -167,4 +175,10 @@ void *task(void *arg)
     }
     
 	return NULL;
+}
+
+// zona das funções
+void trata_sinal(int signal)
+{
+	
 }

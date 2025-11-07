@@ -1,0 +1,745 @@
+/**
+ * @brief Guia Completo de Sincronização de Threads com POSIX Threads (pthreads)
+ * @author Rui Ferreira (adaptado e organizado)
+ * @version 3.0
+ * 
+ * ╔══════════════════════════════════════════════════════════════════════════╗
+ * ║                              ÍNDICE GERAL                                ║
+ * ╚══════════════════════════════════════════════════════════════════════════╝
+ * 
+ * 1. MUTEXES (Exclusão Mútua) ........................................ Linha 50
+ *    1.1. Estrutura de Parâmetros .................................... Linha 60
+ *    1.2. Implementação no Main ...................................... Linha 70
+ *    1.3. Implementação nas Threads .................................. Linha 95
+ * 
+ * 2. VARIÁVEIS DE CONDIÇÃO (Sincronização Condicional) .............. Linha 125
+ *    2.1. Estrutura de Parâmetros ................................... Linha 135
+ *    2.2. Implementação no Main ..................................... Linha 150
+ *    2.3. Thread que Espera (Wait) .................................. Linha 185
+ *    2.4. Thread que Sinaliza (Signal/Broadcast) .................... Linha 215
+ * 
+ * 3. VETOR DE MUTEXES (Múltiplos Recursos) .......................... Linha 245
+ *    3.1. Estrutura de Parâmetros ................................... Linha 255
+ *    3.2. Implementação no Main ..................................... Linha 270
+ *    3.3. Exemplo 1: Incrementar Contador Específico ................ Linha 300
+ *    3.4. Exemplo 2: Processar Múltiplos Elementos .................. Linha 325
+ *    3.5. Exemplo 3: Soma Segura de Todos os Elementos ............. Linha 350
+ * 
+ * 4. MATRIZ DE MUTEXES 2D (Estática) ................................ Linha 380
+ *    4.1. Estrutura de Parâmetros ................................... Linha 390
+ *    4.2. Implementação no Main ..................................... Linha 405
+ *    4.3. Implementação nas Threads ................................. Linha 435
+ * 
+ * 5. ALOCAÇÃO DINÂMICA - Vetores .................................... Linha 465
+ *    5.1. Criar Vetor de Mutexes .................................... Linha 475
+ *    5.2. Inicializar Vetor de Mutexes .............................. Linha 490
+ *    5.3. Destruir Vetor de Mutexes ................................. Linha 510
+ * 
+ * 6. ALOCAÇÃO DINÂMICA - Matrizes ................................... Linha 525
+ *    6.1. Criar Matriz de Mutexes ................................... Linha 535
+ *    6.2. Inicializar Matriz de Mutexes ............................. Linha 565
+ *    6.3. Destruir Matriz de Mutexes ................................ Linha 580
+ *    6.4. Criar Matriz de Inteiros .................................. Linha 595
+ *    6.5. Destruir Matriz de Inteiros ............................... Linha 620
+ * 
+ * 7. MACROS ÚTEIS (Lock/Unlock com Verificação) ..................... Linha 635
+ *    7.1. Macros Simples ............................................. Linha 645
+ *    7.2. Macros para Vetores ........................................ Linha 660
+ *    7.3. Macros para Matrizes ....................................... Linha 675
+ * 
+ * 8. BOAS PRÁTICAS E DICAS .......................................... Linha 695
+ * 
+ * 9. EXEMPLOS COMPLETOS DE APLICAÇÃO ................................ Linha 720
+ *    9.1. Sistema de Votação ......................................... Linha 730
+ *    9.2. Sistema Bancário ........................................... Linha 760
+ *    9.3. Buffer Circular ............................................ Linha 790
+ * 
+ * ╚══════════════════════════════════════════════════════════════════════════╝
+ */
+
+#include <pthread.h>
+#include <errno.h>
+#include <stdlib.h>
+#include <string.h>
+#include <stdio.h>
+#include <unistd.h>
+
+
+//**********************************************************************
+// 1. MUTEXES - Exclusão Mútua (um mutex para proteger um recurso)
+//**********************************************************************
+
+/* 
+ * CONCEITO: Mutex = Mutual Exclusion
+ * - Garante que apenas UMA thread acede ao recurso partilhado de cada vez
+ * - Usa-se para proteger secções críticas (código que acede a recursos partilhados)
+ */
+
+// ========== 1.1. ESTRUTURA DE PARÂMETROS ==========
+typedef struct {
+    pthread_mutex_t *ptr_mutex;  // Ponteiro para o mutex partilhado
+    // ... outros campos necessários
+} thread_params_t;
+
+
+// ========== 1.2. IMPLEMENTAÇÃO NO MAIN (thread principal) ==========
+void exemplo_mutex_main() {
+    pthread_mutex_t mutex;
+    thread_params_t thread_params;
+    
+    // 1. Inicializar o mutex ANTES de criar as threads
+    if ((errno = pthread_mutex_init(&mutex, NULL)) != 0) {
+        perror("pthread_mutex_init() failed");
+        exit(12);
+    }
+    
+    // 2. Passar o mutex para as threads através da estrutura
+    thread_params.ptr_mutex = &mutex;
+    
+    // ... criar threads e executar ...
+    
+    // 3. Destruir o mutex DEPOIS de todas as threads terminarem
+    if ((errno = pthread_mutex_destroy(&mutex)) != 0) {
+        perror("pthread_mutex_destroy() failed");
+        exit(13);
+    }
+}
+
+
+// ========== 1.3. IMPLEMENTAÇÃO NAS THREADS ==========
+void *thread_function(void *args) {
+    thread_params_t *params = (thread_params_t *)args;
+    
+    // ENTRAR na secção crítica (bloqueia se outro thread estiver dentro)
+    if ((errno = pthread_mutex_lock(params->ptr_mutex)) != 0) {
+        perror("pthread_mutex_lock() failed");
+        return NULL;
+    }
+    
+    // ============ SECÇÃO CRÍTICA ============
+    // Apenas UMA thread pode estar aqui de cada vez
+    // Acesso a variáveis partilhadas, ficheiros, etc.
+    // ========================================
+    
+    // SAIR da secção crítica (liberta o mutex)
+    if ((errno = pthread_mutex_unlock(params->ptr_mutex)) != 0) {
+        perror("pthread_mutex_unlock() failed");
+        return NULL;
+    }
+    
+    return NULL;
+}
+
+
+//**********************************************************************
+// 2. VARIÁVEIS DE CONDIÇÃO - Sincronização Condicional
+//**********************************************************************
+
+/*
+ * CONCEITO: Permite que threads esperem até que uma condição específica seja verdadeira
+ * - Usa-se SEMPRE em conjunto com um MUTEX
+ * - pthread_cond_wait(): bloqueia a thread até ser sinalizada
+ * - pthread_cond_signal(): acorda UMA thread em espera
+ * - pthread_cond_broadcast(): acorda TODAS as threads em espera
+ */
+
+// ========== 2.1. ESTRUTURA DE PARÂMETROS ==========
+typedef struct {
+    pthread_mutex_t *ptr_mutex;
+    pthread_cond_t *ptr_cond;
+    int condição_partilhada;  // Exemplo: flag, contador, etc.
+    // ... outros campos
+} thread_params_cond_t;
+
+
+// ========== 2.2. IMPLEMENTAÇÃO NO MAIN ==========
+void exemplo_condvar_main() {
+    pthread_mutex_t mutex;
+    pthread_cond_t cond;
+    thread_params_cond_t thread_params;
+    
+    // 1. Inicializar mutex e variável de condição
+    if ((errno = pthread_mutex_init(&mutex, NULL)) != 0) {
+        perror("pthread_mutex_init() failed");
+        exit(14);
+    }
+    
+    if ((errno = pthread_cond_init(&cond, NULL)) != 0) {
+        perror("pthread_cond_init() failed");
+        exit(15);
+    }
+    
+    thread_params.ptr_mutex = &mutex;
+    thread_params.ptr_cond = &cond;
+    thread_params.condição_partilhada = 0;
+    
+    // ... criar threads e executar ...
+    
+    // 2. Destruir variável de condição e mutex
+    if ((errno = pthread_cond_destroy(&cond)) != 0) {
+        perror("pthread_cond_destroy() failed");
+        exit(16);
+    }
+    
+    if ((errno = pthread_mutex_destroy(&mutex)) != 0) {
+        perror("pthread_mutex_destroy() failed");
+        exit(17);
+    }
+}
+
+
+// ========== 2.3. THREAD QUE ESPERA (WAIT) ==========
+void *thread_espera(void *args) {
+    thread_params_cond_t *params = (thread_params_cond_t *)args;
+    
+    // Adquirir o mutex
+    pthread_mutex_lock(params->ptr_mutex);
+    
+    // IMPORTANTE: Usar WHILE, não IF (para evitar spurious wakeups)
+    while (params->condição_partilhada != 1) {  // Substitua pela sua condição
+        // pthread_cond_wait():
+        // 1. Liberta o mutex automaticamente
+        // 2. Bloqueia a thread até ser sinalizada
+        // 3. Re-adquire o mutex antes de retornar
+        if ((errno = pthread_cond_wait(params->ptr_cond, params->ptr_mutex)) != 0) {
+            perror("pthread_cond_wait() failed");
+            pthread_mutex_unlock(params->ptr_mutex);
+            return NULL;
+        }
+    }
+    
+    // A condição é verdadeira e temos o mutex
+    // ... código a executar ...
+    
+    pthread_mutex_unlock(params->ptr_mutex);
+    return NULL;
+}
+
+
+// ========== 2.4. THREAD QUE SINALIZA (SIGNAL/BROADCAST) ==========
+void *thread_sinaliza(void *args) {
+    thread_params_cond_t *params = (thread_params_cond_t *)args;
+    
+    pthread_mutex_lock(params->ptr_mutex);
+    
+    // Modificar a condição
+    params->condição_partilhada = 1;
+    
+    // Opção 1: Acordar UMA thread em espera
+    if ((errno = pthread_cond_signal(params->ptr_cond)) != 0) {
+        perror("pthread_cond_signal() failed");
+    }
+    
+    // Opção 2: Acordar TODAS as threads em espera
+    // if ((errno = pthread_cond_broadcast(params->ptr_cond)) != 0) {
+    //     perror("pthread_cond_broadcast() failed");
+    // }
+    
+    pthread_mutex_unlock(params->ptr_mutex);
+    return NULL;
+}
+
+
+//**********************************************************************
+// 3. VETOR DE MUTEXES - Múltiplos recursos independentes
+//**********************************************************************
+
+/*
+ * CONCEITO: Um mutex por cada elemento do vetor
+ * - Permite que threads acedam a elementos diferentes simultaneamente
+ * - Exemplo: array de contadores, cada um protegido pelo seu mutex
+ */
+
+#define NUM_ELEMENTOS 16
+
+// ========== 3.1. ESTRUTURA DE PARÂMETROS ==========
+typedef struct {
+    pthread_mutex_t *ptr_mutex;  // Aponta para o vetor de mutexes
+    int *contador;               // Array de contadores partilhados
+    int tamanho;                 // Número de elementos
+} thread_params_array_t;
+
+
+// ========== 3.2. IMPLEMENTAÇÃO NO MAIN ==========
+void exemplo_vetor_mutexes() {
+    pthread_mutex_t mutex[NUM_ELEMENTOS];
+    int contador[NUM_ELEMENTOS] = {0};  // Inicializar a zero
+    thread_params_array_t thread_params;
+    
+    // Inicializar todos os mutexes do vetor
+    for (int i = 0; i < NUM_ELEMENTOS; i++) {
+        if ((errno = pthread_mutex_init(&mutex[i], NULL)) != 0) {
+            perror("pthread_mutex_init() failed");
+            exit(12);
+        }
+    }
+    
+    // Passar o vetor para as threads
+    thread_params.ptr_mutex = mutex;
+    thread_params.contador = contador;
+    thread_params.tamanho = NUM_ELEMENTOS;
+    
+    // ... criar threads e executar ...
+    
+    // Destruir todos os mutexes
+    for (int i = 0; i < NUM_ELEMENTOS; i++) {
+        if ((errno = pthread_mutex_destroy(&mutex[i])) != 0) {
+            perror("pthread_mutex_destroy() failed");
+            exit(13);
+        }
+    }
+}
+
+
+// ========== 3.3. EXEMPLO 1: Incrementar Contador Específico ==========
+void *thread_incrementa(void *args) {
+    thread_params_array_t *params = (thread_params_array_t *)args;
+    int meu_indice = 5;  // Cada thread trabalha num índice diferente
+    
+    for (int i = 0; i < 1000; i++) {
+        // Bloquear apenas o mutex do elemento específico
+        if ((errno = pthread_mutex_lock(&params->ptr_mutex[meu_indice])) != 0) {
+            perror("pthread_mutex_lock() failed");
+            return NULL;
+        }
+        
+        // Incrementar o contador deste elemento
+        params->contador[meu_indice]++;
+        
+        if ((errno = pthread_mutex_unlock(&params->ptr_mutex[meu_indice])) != 0) {
+            perror("pthread_mutex_unlock() failed");
+            return NULL;
+        }
+    }
+    
+    return NULL;
+}
+
+
+// ========== 3.4. EXEMPLO 2: Processar Múltiplos Elementos ==========
+void *thread_processa_varios(void *args) {
+    thread_params_array_t *params = (thread_params_array_t *)args;
+    
+    // Processar elementos de 0 a 7
+    for (int idx = 0; idx < 8; idx++) {
+        // Bloquear mutex do elemento atual
+        pthread_mutex_lock(&params->ptr_mutex[idx]);
+        
+        // Processar elemento
+        params->contador[idx] += 10;
+        printf("Elemento %d agora vale: %d\n", idx, params->contador[idx]);
+        
+        pthread_mutex_unlock(&params->ptr_mutex[idx]);
+        
+        // Pequeno delay para simular processamento
+        usleep(100);
+    }
+    
+    return NULL;
+}
+
+
+// ========== 3.5. EXEMPLO 3: Soma Segura de Todos os Elementos ==========
+void *thread_soma_total(void *args) {
+    thread_params_array_t *params = (thread_params_array_t *)args;
+    int soma = 0;
+    
+    // Bloquear TODOS os mutexes na ordem (evitar deadlock)
+    for (int i = 0; i < params->tamanho; i++) {
+        pthread_mutex_lock(&params->ptr_mutex[i]);
+    }
+    
+    // Agora temos acesso exclusivo a todos os elementos
+    for (int i = 0; i < params->tamanho; i++) {
+        soma += params->contador[i];
+    }
+    
+    printf("Soma total: %d\n", soma);
+    
+    // Desbloquear todos na ordem inversa (boa prática)
+    for (int i = params->tamanho - 1; i >= 0; i--) {
+        pthread_mutex_unlock(&params->ptr_mutex[i]);
+    }
+    
+    return NULL;
+}
+
+
+//**********************************************************************
+// 4. MATRIZ DE MUTEXES 2D - Estática
+//**********************************************************************
+
+/*
+ * CONCEITO: Um mutex por cada posição [linha][coluna]
+ * - Útil para matrizes onde múltiplas threads acedem a células diferentes
+ */
+
+#define ROWS 4
+#define COLS 4
+
+// ========== 4.1. ESTRUTURA DE PARÂMETROS ==========
+typedef struct {
+    pthread_mutex_t (*ptr_mat_mutex)[COLS];  // Ponteiro para matriz
+    int (*dados)[COLS];                       // Dados da matriz
+} thread_params_matrix_t;
+
+
+// ========== 4.2. IMPLEMENTAÇÃO NO MAIN ==========
+void exemplo_matriz_mutexes() {
+    pthread_mutex_t mat_mutex[ROWS][COLS];
+    int dados[ROWS][COLS] = {0};
+    thread_params_matrix_t thread_params;
+    
+    // Inicializar todos os mutexes da matriz
+    for (int r = 0; r < ROWS; r++) {
+        for (int c = 0; c < COLS; c++) {
+            if ((errno = pthread_mutex_init(&mat_mutex[r][c], NULL)) != 0) {
+                perror("pthread_mutex_init() failed");
+                exit(12);
+            }
+        }
+    }
+    
+    thread_params.ptr_mat_mutex = mat_mutex;
+    thread_params.dados = dados;
+    
+    // ... criar threads e executar ...
+    
+    // Destruir todos os mutexes
+    for (int r = 0; r < ROWS; r++) {
+        for (int c = 0; c < COLS; c++) {
+            if ((errno = pthread_mutex_destroy(&mat_mutex[r][c])) != 0) {
+                perror("pthread_mutex_destroy() failed");
+                exit(13);
+            }
+        }
+    }
+}
+
+
+// ========== 4.3. IMPLEMENTAÇÃO NAS THREADS ==========
+void *thread_acede_matriz(void *args) {
+    thread_params_matrix_t *params = (thread_params_matrix_t *)args;
+    int row = 2, col = 3;  // Exemplo: aceder à célula [2][3]
+    
+    // Bloquear apenas o mutex desta célula específica
+    if ((errno = pthread_mutex_lock(&params->ptr_mat_mutex[row][col])) != 0) {
+        perror("pthread_mutex_lock() failed");
+        return NULL;
+    }
+    
+    // Modificar a célula
+    params->dados[row][col]++;
+    
+    if ((errno = pthread_mutex_unlock(&params->ptr_mat_mutex[row][col])) != 0) {
+        perror("pthread_mutex_unlock() failed");
+        return NULL;
+    }
+    
+    return NULL;
+}
+
+
+//**********************************************************************
+// 5. ALOCAÇÃO DINÂMICA - Vetores
+//**********************************************************************
+
+/*
+ * CONCEITO: Para quando o tamanho não é conhecido em tempo de compilação
+ * - Permite criar estruturas com tamanho definido em runtime
+ */
+
+// ========== 5.1. CRIAR VETOR DE MUTEXES ==========
+pthread_mutex_t *criarVetorMutex(int tamanho) {
+    pthread_mutex_t *v = malloc(tamanho * sizeof(pthread_mutex_t));
+    if (v == NULL) {
+        perror("malloc vetor mutex");
+        return NULL;
+    }
+    return v;
+}
+
+
+// ========== 5.2. INICIALIZAR VETOR DE MUTEXES ==========
+int inicializarVetorMutex(pthread_mutex_t *mutex, int tamanho) {
+    for (int i = 0; i < tamanho; i++) {
+        if ((errno = pthread_mutex_init(&mutex[i], NULL)) != 0) {
+            perror("pthread_mutex_init() failed");
+            // Destruir os mutexes já inicializados
+            for (int j = 0; j < i; j++) {
+                pthread_mutex_destroy(&mutex[j]);
+            }
+            return -1;
+        }
+    }
+    return 0;
+}
+
+
+// ========== 5.3. DESTRUIR VETOR DE MUTEXES ==========
+void destruirVetorMutex(pthread_mutex_t *v, int tamanho) {
+    if (v == NULL) return;
+    
+    for (int i = 0; i < tamanho; i++) {
+        pthread_mutex_destroy(&v[i]);
+    }
+    free(v);
+}
+
+
+//**********************************************************************
+// 6. ALOCAÇÃO DINÂMICA - Matrizes
+//**********************************************************************
+
+// ========== 6.1. CRIAR MATRIZ DE MUTEXES ==========
+pthread_mutex_t **criarMatrizMutex(int linhas, int colunas) {
+    // Alocar array de ponteiros (linhas)
+    pthread_mutex_t **m = malloc(linhas * sizeof(pthread_mutex_t *));
+    if (m == NULL) {
+        perror("malloc linhas");
+        exit(1);
+    }
+    
+    // Alocar cada linha (colunas)
+    for (int i = 0; i < linhas; i++) {
+        m[i] = malloc(colunas * sizeof(pthread_mutex_t));
+        if (m[i] == NULL) {
+            perror("malloc colunas");
+            // Libertar memória já alocada em caso de erro
+            for (int j = 0; j < i; j++) {
+                free(m[j]);
+            }
+            free(m);
+            exit(1);
+        }
+    }
+    
+    return m;
+}
+
+
+// ========== 6.2. INICIALIZAR MATRIZ DE MUTEXES ==========
+void inicializarMatrizMutex(pthread_mutex_t **mutex, int linhas, int colunas) {
+    for (int r = 0; r < linhas; r++) {
+        for (int c = 0; c < colunas; c++) {
+            if ((errno = pthread_mutex_init(&mutex[r][c], NULL)) != 0) {
+                perror("pthread_mutex_init() failed");
+                exit(12);
+            }
+        }
+    }
+}
+
+
+// ========== 6.3. DESTRUIR MATRIZ DE MUTEXES ==========
+void destruirMatrizMutex(pthread_mutex_t **m, int linhas, int colunas) {
+    for (int i = 0; i < linhas; i++) {
+        for (int j = 0; j < colunas; j++) {
+            pthread_mutex_destroy(&m[i][j]);
+        }
+        free(m[i]);  // Libertar cada linha
+    }
+    free(m);  // Libertar array de ponteiros
+}
+
+
+// ========== 6.4. CRIAR MATRIZ DE INTEIROS ==========
+int **criarMatrizInt(int linhas, int colunas) {
+    int **v = malloc(linhas * sizeof(int *));
+    if (v == NULL) {
+        perror("malloc linhas");
+        exit(1);
+    }
+    
+    for (int i = 0; i < linhas; i++) {
+        v[i] = malloc(colunas * sizeof(int));
+        if (v[i] == NULL) {
+            perror("malloc colunas");
+            for (int j = 0; j < i; j++) {
+                free(v[j]);
+            }
+            free(v);
+            exit(1);
+        }
+        // Inicializar com zeros
+        memset(v[i], 0, colunas * sizeof(int));
+    }
+    
+    return v;
+}
+
+
+// ========== 6.5. DESTRUIR MATRIZ DE INTEIROS ==========
+void destruirMatrizInt(int **v, int linhas) {
+    for (int i = 0; i < linhas; i++) {
+        free(v[i]);
+    }
+    free(v);
+}
+
+
+//**********************************************************************
+// 7. MACROS ÚTEIS (Lock/Unlock com Verificação)
+//**********************************************************************
+
+// ========== 7.1. MACROS SIMPLES ==========
+#define LOCK(mutex) \
+    if ((errno = pthread_mutex_lock(mutex)) != 0) { \
+        perror("pthread_mutex_lock() failed"); \
+        return NULL; \
+    }
+
+#define UNLOCK(mutex) \
+    if ((errno = pthread_mutex_unlock(mutex)) != 0) { \
+        perror("pthread_mutex_unlock() failed"); \
+        return NULL; \
+    }
+
+
+// ========== 7.2. MACROS PARA VETORES ==========
+#define LOCK_ARRAY(mutex_array, index) \
+    if ((errno = pthread_mutex_lock(&(mutex_array)[index])) != 0) { \
+        fprintf(stderr, "ERRO Lock array[%d]: errno=%d\n", index, errno); \
+        return NULL; \
+    }
+
+#define UNLOCK_ARRAY(mutex_array, index) \
+    if ((errno = pthread_mutex_unlock(&(mutex_array)[index])) != 0) { \
+        fprintf(stderr, "ERRO Unlock array[%d]: errno=%d\n", index, errno); \
+        return NULL; \
+    }
+
+
+// ========== 7.3. MACROS PARA MATRIZES ==========
+#define LOCK_MATRIX(mutex_matrix, row, col) \
+    if ((errno = pthread_mutex_lock(&(mutex_matrix)[row][col])) != 0) { \
+        fprintf(stderr, "ERRO Lock matrix[%d][%d]: errno=%d\n", row, col, errno); \
+        return NULL; \
+    }
+
+#define UNLOCK_MATRIX(mutex_matrix, row, col) \
+    if ((errno = pthread_mutex_unlock(&(mutex_matrix)[row][col])) != 0) { \
+        fprintf(stderr, "ERRO Unlock matrix[%d][%d]: errno=%d\n", row, col, errno); \
+        return NULL; \
+    }
+
+
+//**********************************************************************
+// 8. BOAS PRÁTICAS E DICAS
+//**********************************************************************
+
+/*
+ * ✅ REGRAS ESSENCIAIS:
+ * 
+ * 1. Inicializar mutexes ANTES de criar threads
+ * 2. Destruir mutexes DEPOIS de threads terminarem (pthread_join)
+ * 3. Usar WHILE (não IF) com pthread_cond_wait() (spurious wakeups)
+ * 4. Manter secções críticas o mais CURTAS possível
+ * 5. Sempre verificar retornos das funções pthread_*
+ * 6. Libertar TODA a memória alocada dinamicamente
+ * 
+ * ⚠️ EVITAR DEADLOCKS:
+ * 
+ * - Adquirir múltiplos mutexes sempre na MESMA ORDEM
+ * - Se precisar de 2 mutexes: bloquear o de índice menor primeiro
+ * - Exemplo: Para mutexes[5] e mutexes[10], bloquear 5 primeiro, depois 10
+ * 
+ * 🔍 DEBUG:
+ * 
+ * - Usar valgrind para detetar memory leaks
+ * - Usar helgrind para detetar race conditions e deadlocks
+ * - Comando: valgrind --tool=helgrind ./programa
+ */
+
+
+//**********************************************************************
+// 9. EXEMPLOS COMPLETOS DE APLICAÇÃO
+//**********************************************************************
+
+// ========== 9.1. SISTEMA DE VOTAÇÃO ==========
+typedef struct {
+    pthread_mutex_t **ptr_mutex;
+    int **vetorVotos;
+    int regiaoId;
+    int numPartidos;
+} votacao_params_t;
+
+void *thread_eleitor(void *args) {
+    votacao_params_t *p = (votacao_params_t *)args;
+    
+    // Escolher partido aleatoriamente
+    int partido = rand() % p->numPartidos;
+    
+    // Votar de forma segura
+    LOCK_MATRIX(p->ptr_mutex, p->regiaoId, partido);
+    p->vetorVotos[p->regiaoId][partido]++;
+    UNLOCK_MATRIX(p->ptr_mutex, p->regiaoId, partido);
+    
+    return NULL;
+}
+
+
+// ========== 9.2. SISTEMA BANCÁRIO ==========
+typedef struct {
+    pthread_mutex_t *mutexes;
+    double *saldos;
+    int conta_origem;
+    int conta_destino;
+    double valor;
+} banco_params_t;
+
+void *thread_transferencia(void *args) {
+    banco_params_t *p = (banco_params_t *)args;
+    
+    // Bloquear na ordem para evitar deadlock
+    int primeiro = (p->conta_origem < p->conta_destino) ? p->conta_origem : p->conta_destino;
+    int segundo = (p->conta_origem < p->conta_destino) ? p->conta_destino : p->conta_origem;
+    
+    LOCK_ARRAY(p->mutexes, primeiro);
+    LOCK_ARRAY(p->mutexes, segundo);
+    
+    // Fazer transferência
+    if (p->saldos[p->conta_origem] >= p->valor) {
+        p->saldos[p->conta_origem] -= p->valor;
+        p->saldos[p->conta_destino] += p->valor;
+    }
+    
+    UNLOCK_ARRAY(p->mutexes, segundo);
+    UNLOCK_ARRAY(p->mutexes, primeiro);
+    
+    return NULL;
+}
+
+
+// ========== 9.3. BUFFER CIRCULAR (Produtor-Consumidor) ==========
+typedef struct {
+    pthread_mutex_t *mutexes;
+    pthread_cond_t *cond_cheio;
+    pthread_cond_t *cond_vazio;
+    int *buffer;
+    int tamanho;
+    int *contador;
+} buffer_circular_t;
+
+void *thread_produtor(void *args) {
+    buffer_circular_t *buf = (buffer_circular_t *)args;
+    
+    for (int i = 0; i < 100; i++) {
+        pthread_mutex_lock(&buf->mutexes[0]);
+        
+        // Esperar se buffer cheio
+        while (*buf->contador >= buf->tamanho) {
+            pthread_cond_wait(buf->cond_cheio, &buf->mutexes[0]);
+        }
+        
+        // Produzir
+        buf->buffer[*buf->contador] = i;
+        (*buf->contador)++;
+        
+        // Sinalizar consumidor
+        pthread_cond_signal(buf->cond_vazio);
+        pthread_mutex_unlock(&buf->mutexes[0]);
+    }
+    
+    return NULL;
+}

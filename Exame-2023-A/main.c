@@ -35,11 +35,13 @@ typedef struct
     pthread_mutex_t *ptr_mutex;
 }thread_params_t;
 void *task(void *arg);
+void trata_sinal(int signal);
+int flag = 0;  // só para comunicação com o handler
 
 int main(int argc, char *argv[]) {
 
 	struct gengetopt_args_info args;
-
+	
 	// gengetopt parser: deve ser a primeira linha de código no main
 	if(cmdline_parser(argc, argv, &args))
 		ERROR(1, "Erro: execução de cmdline_parser\n");
@@ -69,7 +71,16 @@ int main(int argc, char *argv[]) {
 	    if ((errno = pthread_mutex_init(&mutex, NULL)) != 0)
 		ERROR(12, "pthread_mutex_init() failed");
 
-
+        struct sigaction act;
+        
+        act.sa_handler = trata_sinal;    // Define o handler
+        sigemptyset(&act.sa_mask);       // Não bloqueia outros sinais
+        act.sa_flags = 0;                // Sem flags especiais
+        // act.sa_flags |= SA_RESTART;   // Descomentaria se quisesse restart automático
+        
+        // Captura SIGINT (Ctrl+C)
+        if(sigaction(SIGINT, &act, NULL) < 0)
+            ERROR(3, "sigaction (sa_handler) - SIGINT");
 
 		
 
@@ -97,6 +108,8 @@ int main(int argc, char *argv[]) {
         }
         printf("process finished...\n");
 
+// Captura do sinal ??? 
+	  
 
         for(int i=0;i<data_size;i++){
             printf("%d: %d\n",i,array_data_size[i]);
@@ -132,10 +145,35 @@ void *task(void *arg)
     
   
    while (1){
+
+            if (flag == 1) {
+            // Entra no mutex para ler valores consistentes
+            if ((errno = pthread_mutex_lock(params->ptr_mutex)) != 0) {
+                WARNING("pthread_mutex_lock() failed");
+                return NULL;
+            }
+            
+            int processados = *params->indice;
+            int total = params->data_size;
+            float percentagem = (processados * 100.0) / total;
+            
+            printf("\n[SIGINT] Progresso: %d/%d valores processados (%.2f%%)\n",
+                   processados, total, percentagem);
+            
+            flag = 0;  // Reset da flag
+            
+            if ((errno = pthread_mutex_unlock(params->ptr_mutex)) != 0) {
+                WARNING("pthread_mutex_unlock() failed");
+                return NULL;
+            }
+        }
+
+
         // Sleep ANTES de pegar trabalho (múltiplo de 100ms)
     int random_ms = ((rand_r(&rand_state) % 10) + 1) * 100; // 100-1000ms
     usleep(random_ms * 1000); // converte para microsegundos
     
+   
 
 	// Mutex: entra na secção crítica 
 	if ((errno = pthread_mutex_lock(params->ptr_mutex)) != 0){		
@@ -174,3 +212,11 @@ void *task(void *arg)
 
 	return NULL;
 }
+// zona das funções
+void trata_sinal(int signal)
+{
+    if (signal == SIGINT) {
+        flag = 1;
+    }
+}
+
