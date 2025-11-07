@@ -30,23 +30,18 @@ typedef struct
 {
 	int id;
 	int num_reservations;
+    int *count;
     int *seats;
     pthread_mutex_t *ptr_mutex;
 }thread_params_t;
 
 void *task(void *arg);
-void trata_sinal(int signal);
-int flag = 0;  // só para comunicação com o handler
 
 
 int main(int argc, char *argv[]) {
     
 	struct gengetopt_args_info args;
-	struct sigaction act;
-    // configura handler
-    act.sa_handler = trata_sinal;     // função que será chamada
-    sigemptyset(&act.sa_mask);        // não bloqueia outros sinais
-    act.sa_flags = 0;                 // flags padrão
+            // flags padrão
 	// gengetopt parser: deve ser a primeira linha de código no main
 	if(cmdline_parser(argc, argv, &args))
 		ERROR(1, "Erro: execução de cmdline_parser\n");
@@ -55,7 +50,7 @@ int main(int argc, char *argv[]) {
         int num_threads=args.number_threads_arg;
         int num_reservations=args.num_of_reservations_arg;
 
-
+        int count=0;
         if(num_threads<1||num_reservations<1)ERROR(1,"Valores inputed invalidos!");
 
 
@@ -87,6 +82,7 @@ int main(int argc, char *argv[]) {
             thread_params[i].seats = seats;
             thread_params[i].ptr_mutex=mutex;
             thread_params[i].num_reservations=num_reservations;
+            thread_params[i].count=&count;
 
         }
         
@@ -104,6 +100,7 @@ int main(int argc, char *argv[]) {
         }
 
 
+
         for (int i = 0; i < SIZE_ARRAY; i++)
         {
             if(seats[i]==0){
@@ -115,6 +112,7 @@ int main(int argc, char *argv[]) {
         }
         
 
+        printf("count:%d \n",count);
 
         for(int i=0;i<SIZE_ARRAY;i++){
 
@@ -164,21 +162,16 @@ void *task(void *arg)
 
             params->seats[random_seat]=params->id;
        }
-        
+
         // Mutex: sai da secção crítica 
         if ((errno = pthread_mutex_unlock(&params->ptr_mutex[random_seat])) != 0){
             WARNING("pthread_mutex_unlock() failed");
             return NULL;
         }
-
+        
 
     }
     
 	return NULL;
 }
 
-// zona das funções
-void trata_sinal(int signal)
-{
-	
-}
